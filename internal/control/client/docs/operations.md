@@ -29,6 +29,15 @@ cold cache. Add `--clean` only when a genuinely clean Xcode build is required â€
 key's DerivedData while keeping content-addressed source transfer. Use `--full-upload` only to
 exercise the legacy ZIP path.
 
+The worker enables Xcode's compilation cache (Xcode 26+) for every compile and keeps it per
+toolchain, shared by all cache keys. A `--clean` build therefore usually replays compiler outputs
+in seconds instead of recompiling. One Xcode behaviour to know: after a build that was served
+entirely from the compilation cache, the next source change recompiles the whole Swift module
+once; later changes are incremental again. Because `--clean` (or a new cache key) is what produces
+such a build, avoid `--clean` in an edit-build loop â€” it rarely helps a correct build and moves a
+full Swift recompile to the following edit. The build's `compilation_cache_hits` and
+`compilation_cache_misses` metrics show what the cache served.
+
 ## Measured timings
 
 Representative 952-file, multi-target native iOS project, July 30, 2026:
