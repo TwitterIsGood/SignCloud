@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.signcloud.agent</string>
+  <key>ProgramArguments</key><array><string>/usr/local/bin/signcloud-agent</string></array>
+  <key>WorkingDirectory</key><string>/Users/buildbot</string>
+  <key>EnvironmentVariables</key><dict>
+    <key>SIGNCLOUD_SERVER</key><string>https://build.example.com</string>
+    <key>SIGNCLOUD_AGENT_TOKEN</key><string>REPLACE_ME</string>
+    <key>SIGNCLOUD_WORKER_ID</key><string>mac-builder-01</string>
+    <key>SIGNCLOUD_WORK_ROOT</key><string>/Users/buildbot/SignCloudWork</string>
+    <key>APPLE_TEAM_ID</key><string>REPLACE_ME</string>
+    <key>IOS_SIGNING_IDENTITY</key><string>Apple Development</string>
+    <key>IOS_EPHEMERAL_KEYCHAIN</key><string>true</string>
+    <key>IOS_SIGNING_P12_PATH</key><string>/Users/buildbot/Signing/apple-development.p12</string>
+    <key>IOS_SIGNING_P12_PASSWORD_FILE</key><string>/Users/buildbot/Signing/p12-password</string>
+    <key>IOS_WILDCARD_PROFILE</key><string>SignCloud Wildcard Development</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/Users/buildbot/Library/Logs/signcloud-agent.log</string>
+  <key>StandardErrorPath</key><string>/Users/buildbot/Library/Logs/signcloud-agent.error.log</string>
+</dict></plist>

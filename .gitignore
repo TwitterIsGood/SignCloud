@@ -1,0 +1,14 @@
+.env
+.DS_Store
+bin/
+data/
+dist/
+work/
+cache/
+secrets/
+*.log
+*.p8
+*.p12
+*.mobileprovision
+__pycache__/
+*.pyc

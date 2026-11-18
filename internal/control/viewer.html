@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SignCloud 实时验证</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; background: #0b0d10; color: #e6e8eb; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  #app { display: flex; flex-direction: column; height: 100%; }
+  header { padding: 10px 16px; display: flex; gap: 12px; align-items: center; border-bottom: 1px solid #22262c; flex-wrap: wrap; }
+  #title { font-weight: 600; }
+  #meta { color: #9aa3ad; font-size: 13px; }
+  #status { margin-left: auto; font-size: 13px; color: #9aa3ad; }
+  #stage { flex: 1; display: flex; align-items: center; justify-content: center; padding: 12px; min-height: 0; position: relative; }
+  canvas { max-width: 100%; max-height: 100%; background: #000; border-radius: 8px; touch-action: none; outline: none; }
+  #overlay { position: absolute; padding: 10px 14px; border-radius: 8px; background: rgba(16,20,26,.92); font-size: 13px; color: #c9d1d9; max-width: 70%; text-align: center; line-height: 1.5; }
+  #overlay[hidden] { display: none; }
+  footer { display: flex; gap: 8px; padding: 10px 16px; border-top: 1px solid #22262c; flex-wrap: wrap; align-items: center; }
+  button { background: #1b2027; color: #e6e8eb; border: 1px solid #2c333c; border-radius: 6px; padding: 7px 12px; font-size: 13px; cursor: pointer; }
+  button:hover:not(:disabled) { background: #232a33; }
+  button:disabled { opacity: .4; cursor: default; }
+  a { color: #6cb6ff; font-size: 13px; }
+  #hint { color: #7d8792; font-size: 12px; margin-left: auto; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <span id="title">SignCloud 实时验证</span>
+    <span id="meta"></span>
+    <span id="status">正在连接…</span>
+  </header>
+  <div id="stage">
+    <canvas id="screen" width="360" height="780" tabindex="0"></canvas>
+    <div id="overlay" hidden></div>
+  </div>
+  <footer>
+    <button data-button="home" disabled>主屏幕</button>
+    <button data-button="app_switcher" disabled>多任务</button>
+    <button data-button="lock" disabled>锁屏</button>
+    <button data-button="back" disabled>返回</button>
+    <a id="evidence" href="#" hidden>下载证据包</a>
+    <span id="hint">验证结束后设备会被释放</span>
+  </footer>
+</div>
+<script>
+(() => {
+  "use strict";
+
+  const TOKEN = decodeURIComponent(location.pathname.split("/").filter(Boolean).pop() || "");
+  const canvas = document.getElementById("screen");
+  const ctx = canvas.getContext("2d");
+  const overlay = document.getElementById("overlay");
+  const statusLine = document.getElementById("status");
+  const metaLine = document.getElementById("meta");
+  const titleLine = document.getElementById("title");
+  const evidenceLink = document.getElementById("evidence");
+  const hintLine = document.getElementById("hint");
+  const buttons = [...document.querySelectorAll("button[data-button]")];
+
+  const TAG = { description: 0x01, keyframe: 0x02, delta: 0x03, seed: 0x04, meta: 0x05, alive: 0x06, ended: 0x07 };
+  const INPUT_TAG = { touch: 0x03, button: 0x04, key: 0x06 };
+  const ADMITTED = 0x83;
+  const CONFIG = 0x82;
+  const MAX_FRAME_BYTES = 8 * 1024 * 1024;
+  const MAX_DECODE_QUEUE = 8;
+
+  let build = { status: "", available: false };
+  let streamAbort = null;
+  let streamActive = false;
+  let socket = null;
+  let inputReady = false;
+  let keyboardUnavailable = false;
+  let inputUnavailable = false;
+  let reconnectTimer = 0;
+  let decoder = null;
+  let description = null;
+  let awaitingKeyframe = false;
+  let meta = null;
+
+  function showOverlay(text) {
+    overlay.textContent = text;
+    overlay.hidden = false;
+  }
+  function hideOverlay() { overlay.hidden = true; }
+  function setStatus(text) { statusLine.textContent = text; }
+  function setInputsEnabled(enabled) {
+    for (const button of buttons) button.disabled = !enabled || inputUnavailable;
+  }
+
+  function concat(a, b) {
+    const out = new Uint8Array(a.length + b.length);
+    out.set(a, 0); out.set(b, a.length);
+    return out;
+  }
+  function copy(bytes) { const out = new Uint8Array(bytes.length); out.set(bytes); return out; }
+
+  function splitFrame(buffer) {
+    if (buffer.length < 5) return { kind: "incomplete" };
+    const length = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength).getUint32(0);
+    const total = 4 + length;
+    if (length < 1 || total > MAX_FRAME_BYTES) return { kind: "invalid" };
+    if (buffer.length < total) return { kind: "incomplete" };
+    return { kind: "frame", tag: buffer[4], payload: buffer.subarray(5, total), rest: buffer.slice(total) };
+  }
+
+  function codecString(avcC) {
+    if (avcC[0] !== 0x01 || avcC.length < 4) return null;
+    const hex = (value) => value.toString(16).padStart(2, "0");
+    return `avc1.${hex(avcC[1])}${hex(avcC[2])}${hex(avcC[3])}`;
+  }
+
+  function applyMeta(payload) {
+    try {
+      const parsed = JSON.parse(new TextDecoder().decode(payload));
+      meta = { codec: parsed.codec, width: Number(parsed.width) || 0, height: Number(parsed.height) || 0, fps: Number(parsed.fps) || 0 };
+    } catch { return; }
+    if (meta.width > 0 && meta.height > 0) {
+      canvas.width = meta.width;
+      canvas.height = meta.height;
+    }
+  }
+
+  function configureDecoder(bytes) {
+    if (typeof VideoDecoder === "undefined") throw new Error("此浏览器不支持 WebCodecs");
+    const codec = codecString(bytes);
+    if (!codec) throw new Error("无法识别的视频参数");
+    if (!decoder) {
+      decoder = new VideoDecoder({
+        output(frame) {
+          try {
+            if (canvas.width !== frame.displayWidth || canvas.height !== frame.displayHeight) {
+              canvas.width = frame.displayWidth;
+              canvas.height = frame.displayHeight;
+            }
+            ctx.drawImage(frame, 0, 0);
+          } finally { frame.close(); }
+        },
+        error(error) { fail("解码失败：" + (error && error.message ? error.message : error)); },
+      });
+    }
+    decoder.configure({ codec, description: bytes, optimizeForLatency: true });
+    description = bytes;
+    awaitingKeyframe = false;
+  }
+
+  function decodeChunk(bytes, type) {
+    if (!decoder) { fail("在参数集之前收到了视频帧"); return; }
+    if (type === "delta" && awaitingKeyframe) return;
+    if (type === "key") awaitingKeyframe = false;
+    decoder.decode(new EncodedVideoChunk({ type, timestamp: performance.now() * 1000, data: bytes }));
+    if (decoder.decodeQueueSize > MAX_DECODE_QUEUE) {
+      awaitingKeyframe = true;
+      decoder.reset();
+      if (description) configureDecoder(description);
+    }
+  }
+
+  async function paintStill(bytes) {
+    try {
+      const image = await createImageBitmap(new Blob([bytes.buffer]));
+      canvas.width = image.width; canvas.height = image.height;
+      ctx.drawImage(image, 0, 0);
+      image.close();
+    } catch { /* a still that cannot be painted is one frame lost */ }
+  }
+
+  function endedText(payload) {
+    try {
+      const reason = JSON.parse(new TextDecoder().decode(payload)).reason;
+      return { "device-lost": "设备已断开", expired: "租约已过期", explicit: "租约已释放", killed: "租约被操作员结束" }[reason] || "实时画面已结束";
+    } catch { return "实时画面已结束"; }
+  }
+
+  function fail(message) {
+    setStatus("连接中断");
+    showOverlay(message);
+    streamActive = false;
+    if (streamAbort) streamAbort.abort();
+    scheduleReconnect();
+  }
+
+  async function consume(buffer) {
+    for (;;) {
+      const next = splitFrame(buffer);
+      if (next.kind === "incomplete") return buffer;
+      if (next.kind === "invalid") { fail("视频流格式错误"); return null; }
+      buffer = next.rest;
+      const payload = copy(next.payload);
+      switch (next.tag) {
+        case TAG.meta: applyMeta(payload); break;
+        case TAG.description: configureDecoder(payload); break;
+        case TAG.keyframe: decodeChunk(payload, "key"); break;
+        case TAG.delta:
+          if (meta && meta.codec === "mjpeg") await paintStill(payload); else decodeChunk(payload, "delta");
+          break;
+        case TAG.seed: await paintStill(payload); break;
+        case TAG.ended:
+          showOverlay(endedText(payload));
+          setStatus("已结束");
+          if (streamAbort) streamAbort.abort();
+          streamActive = false;
+          if (socket) socket.close();
+          return null;
+        default: break;
+      }
+    }
+  }
+
+  async function startStream() {
+    if (streamActive || !build.available) return;
+    streamActive = true;
+    hideOverlay();
+    setStatus("实时画面连接中…");
+    const controller = new AbortController();
+    streamAbort = controller;
+    try {
+      const response = await fetch(`/view/${encodeURIComponent(TOKEN)}/screen`, { signal: controller.signal, cache: "no-store" });
+      if (!response.ok || !response.body) {
+        let detail = "";
+        try { detail = (await response.json()).error || ""; } catch { /* not JSON */ }
+        streamActive = false;
+        setStatus(response.status === 409 ? "设备已释放" : "无法连接实时画面");
+        showOverlay(detail || `实时画面不可用（HTTP ${response.status}）`);
+        return;
+      }
+      setStatus("实时画面已连接");
+      const reader = response.body.getReader();
+      let buffer = new Uint8Array(0);
+      for (;;) {
+        const step = await reader.read();
+        if (step.done) break;
+        buffer = concat(buffer, step.value);
+        buffer = await consume(buffer);
+        if (buffer === null) return;
+      }
+      streamActive = false;
+      scheduleReconnect();
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      fail("实时画面连接失败：" + (error && error.message ? error.message : error));
+    }
+  }
+
+  function scheduleReconnect() {
+    clearTimeout(reconnectTimer);
+    if (build.status !== "running") return;
+    reconnectTimer = setTimeout(() => { if (build.status === "running" && build.available) startStream(); }, 2000);
+  }
+
+  function send(tag, body) {
+    if (!socket || socket.readyState !== WebSocket.OPEN || !inputReady) return;
+    const json = new TextEncoder().encode(JSON.stringify(body));
+    const message = new Uint8Array(1 + json.length);
+    message[0] = tag; message.set(json, 1);
+    socket.send(message);
+  }
+
+  function applyScreenConfig(payload) {
+    let config;
+    try { config = JSON.parse(new TextDecoder().decode(payload)); } catch { return; }
+    inputUnavailable = config.inputUnavailable === true;
+    keyboardUnavailable = config.keyboardUnavailable === true;
+    if (inputUnavailable) {
+      setStatus("设备暂不接受输入");
+      setInputsEnabled(false);
+    }
+    hintLine.textContent = keyboardUnavailable ? "此设备不支持注入键盘，只能点按/滑动" : "点击画面后可用键盘输入";
+  }
+
+  function connectInput() {
+    if (socket || !build.available) return;
+    const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+    socket = new WebSocket(`${protocol}//${location.host}/view/${encodeURIComponent(TOKEN)}/input`);
+    socket.binaryType = "arraybuffer";
+    socket.addEventListener("message", (event) => {
+      if (!(event.data instanceof ArrayBuffer)) return;
+      const bytes = new Uint8Array(event.data);
+      if (bytes.length < 1) return;
+      if (bytes[0] === ADMITTED) {
+        inputReady = true;
+        setInputsEnabled(true);
+      } else if (bytes[0] === CONFIG) {
+        applyScreenConfig(bytes.subarray(1));
+      }
+    });
+    socket.addEventListener("close", () => {
+      socket = null; inputReady = false; setInputsEnabled(false);
+      if (build.status === "running" && build.available) setTimeout(connectInput, 2000);
+    });
+    socket.addEventListener("error", () => { try { socket.close(); } catch { /* ignore */ } });
+  }
+
+  const SHIFTED = {
+    "!": ["Digit1", 0x1e], "@": ["Digit2", 0x1f], "#": ["Digit3", 0x20], "$": ["Digit4", 0x21],
+    "%": ["Digit5", 0x22], "^": ["Digit6", 0x23], "&": ["Digit7", 0x24], "*": ["Digit8", 0x25],
+    "(": ["Digit9", 0x26], ")": ["Digit0", 0x27], "_": ["Minus", 0x2d], "+": ["Equal", 0x2e],
+    "{": ["BracketLeft", 0x2f], "}": ["BracketRight", 0x30], "|": ["Backslash", 0x31],
+    ":": ["Semicolon", 0x33], "\"": ["Quote", 0x34], "~": ["Backquote", 0x35],
+    "<": ["Comma", 0x36], ">": ["Period", 0x37], "?": ["Slash", 0x38],
+  };
+  const KEYCODES = {
+    Enter: 0x28, Escape: 0x29, Backspace: 0x2a, Tab: 0x2b, " ": 0x2c,
+    "-": 0x2d, "=": 0x2e, "[": 0x2f, "]": 0x30, "\\": 0x31,
+    ";": 0x33, "'": 0x34, "`": 0x35, ",": 0x36, ".": 0x37, "/": 0x38,
+    ArrowRight: 0x4f, ArrowLeft: 0x50, ArrowDown: 0x51, ArrowUp: 0x52,
+    Delete: 0x4c, Home: 0x4a, End: 0x4d, PageUp: 0x4b, PageDown: 0x4e,
+  };
+
+  function keyUsage(event) {
+    const key = event.key;
+    if (key.length === 1) {
+      const upper = key.toUpperCase();
+      if (upper >= "A" && upper <= "Z") {
+        return { usage: 0x04 + upper.charCodeAt(0) - 65, shift: key !== key.toLowerCase() };
+      }
+      if (key >= "0" && key <= "9") return { usage: 0x1e + Number(key) - 1, shift: false };
+      if (SHIFTED[key]) return { usage: SHIFTED[key][1], shift: true };
+      if (KEYCODES[key]) return { usage: KEYCODES[key], shift: false };
+      return null;
+    }
+    if (KEYCODES[key]) return { usage: KEYCODES[key], shift: false };
+    return null;
+  }
+
+  function onKey(event, type) {
+    if (keyboardUnavailable || !inputReady) return;
+    if (document.activeElement !== canvas) return;
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    if (["Shift", "Control", "Alt", "Meta", "CapsLock"].includes(event.key)) return;
+    const mapped = keyUsage(event);
+    if (!mapped) return;
+    event.preventDefault();
+    if (mapped.shift) send(INPUT_TAG.key, { type: "down", usage: 0xe1 });
+    send(INPUT_TAG.key, { type, usage: mapped.usage });
+    if (mapped.shift) send(INPUT_TAG.key, { type: "up", usage: 0xe1 });
+  }
+
+  function pointerFraction(event) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)),
+      y: Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height)),
+    };
+  }
+
+  canvas.addEventListener("pointerdown", (event) => {
+    canvas.focus();
+    if (!inputReady) return;
+    event.preventDefault();
+    canvas.setPointerCapture(event.pointerId);
+    send(INPUT_TAG.touch, { type: "begin", ...pointerFraction(event) });
+  });
+  canvas.addEventListener("pointermove", (event) => {
+    if (!canvas.hasPointerCapture(event.pointerId)) return;
+    send(INPUT_TAG.touch, { type: "move", ...pointerFraction(event) });
+  });
+  const endPointer = (event) => {
+    if (!canvas.hasPointerCapture(event.pointerId)) return;
+    send(INPUT_TAG.touch, { type: "end", ...pointerFraction(event) });
+    canvas.releasePointerCapture(event.pointerId);
+  };
+  canvas.addEventListener("pointerup", endPointer);
+  canvas.addEventListener("pointercancel", endPointer);
+  canvas.addEventListener("contextmenu", (event) => event.preventDefault());
+
+  for (const button of buttons) {
+    button.addEventListener("click", () => send(INPUT_TAG.button, { button: button.dataset.button }));
+  }
+  window.addEventListener("keydown", (event) => onKey(event, "down"));
+  window.addEventListener("keyup", (event) => onKey(event, "up"));
+
+  function renderInfo(info) {
+    build = info;
+    titleLine.textContent = info.name || "SignCloud 实时验证";
+    const parts = [];
+    if (info.device) parts.push(info.device);
+    if (info.os) parts.push("iOS " + info.os);
+    if (info.mode) parts.push(info.mode);
+    if (info.stage) parts.push(info.stage);
+    metaLine.textContent = parts.join(" · ");
+    const finished = info.status && info.status !== "running";
+    if (finished) {
+      setStatus(info.status === "succeeded" ? "验证完成" : info.status === "failed" ? "验证失败" : info.status);
+      setInputsEnabled(false);
+      if (socket) { socket.close(); socket = null; }
+      if (streamAbort) streamAbort.abort();
+      streamActive = false;
+      clearTimeout(reconnectTimer);
+      evidenceLink.href = `/artifacts/${encodeURIComponent(TOKEN)}`;
+      evidenceLink.hidden = false;
+      if (!overlay.hidden) return;
+      showOverlay(info.status === "succeeded" ? "验证已完成，设备已释放。" : "验证已结束，设备已释放。");
+      return;
+    }
+    evidenceLink.hidden = true;
+    if (info.available) {
+      hideOverlay();
+      startStream();
+      connectInput();
+    } else {
+      showOverlay(info.reason === "no live device yet" ? "正在准备模拟器…" : (info.reason || "等待实时画面…"));
+      setStatus("等待设备");
+      setInputsEnabled(false);
+      scheduleReconnect();
+    }
+  }
+
+  async function poll() {
+    try {
+      const response = await fetch(`/view/${encodeURIComponent(TOKEN)}/info`, { cache: "no-store" });
+      if (!response.ok) {
+        setStatus("无法读取任务状态");
+        showOverlay(`实时验证不可用（HTTP ${response.status}）`);
+        return;
+      }
+      renderInfo(await response.json());
+    } catch {
+      setStatus("状态轮询失败");
+    }
+  }
+
+  poll();
+  setInterval(poll, 2000);
+})();
+</script>
+</body>
+</html>

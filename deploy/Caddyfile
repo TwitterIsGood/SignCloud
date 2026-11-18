@@ -1,0 +1,7 @@
+{$SIGNCLOUD_DOMAIN} {
+    encode zstd gzip
+    request_body {
+        max_size 2GB
+    }
+    reverse_proxy control:8787
+}

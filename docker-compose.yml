@@ -1,0 +1,71 @@
+services:
+  storage-init:
+    image: alpine:3.22
+    command: ["sh", "-c", "mkdir -p /data/sources /data/artifacts /data/blobs /data/tmp && chown -R 65532:65532 /data"]
+    volumes:
+      - build-data:/data
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-signcloud}
+      POSTGRES_USER: ${POSTGRES_USER:-signcloud}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  control:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      storage-init:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-signcloud}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-signcloud}?sslmode=disable
+      SIGNCLOUD_API_TOKEN: ${SIGNCLOUD_API_TOKEN:?set SIGNCLOUD_API_TOKEN in .env}
+      SIGNCLOUD_API_TOKENS: ${SIGNCLOUD_API_TOKENS:-}
+      SIGNCLOUD_AGENT_TOKEN: ${SIGNCLOUD_AGENT_TOKEN:?set SIGNCLOUD_AGENT_TOKEN in .env}
+      SIGNCLOUD_PUBLIC_BASE_URL: ${SIGNCLOUD_PUBLIC_BASE_URL:-http://localhost:18787}
+      SIGNCLOUD_STORAGE_DIR: /data
+      TMPDIR: /data/tmp
+      SIGNCLOUD_MAX_UPLOAD_MB: ${SIGNCLOUD_MAX_UPLOAD_MB:-2048}
+      SIGNCLOUD_MAX_DEVICES_PER_TOKEN: ${SIGNCLOUD_MAX_DEVICES_PER_TOKEN:-3}
+      SIGNCLOUD_DEVICE_ENROLLMENT_ENABLED: ${SIGNCLOUD_DEVICE_ENROLLMENT_ENABLED:-false}
+      SIMLOCK_GATEWAY_URL: ${SIMLOCK_GATEWAY_URL:-http://host.docker.internal:4700}
+      SIMLOCK_OPERATOR_TOKEN: ${SIMLOCK_OPERATOR_TOKEN:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,host.docker.internal}
+      no_proxy: ${NO_PROXY:-localhost,127.0.0.1,host.docker.internal}
+    volumes:
+      - build-data:/data
+    ports:
+      - "18787:8787"
+
+  tls:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    environment:
+      SIGNCLOUD_DOMAIN: ${SIGNCLOUD_DOMAIN:-build.example.com}
+      NO_PROXY: control,localhost,127.0.0.1,postgres
+      no_proxy: control,localhost,127.0.0.1,postgres
+    depends_on:
+      control:
+        condition: service_started
+    volumes:
+      - ./deploy/Caddyfile.manual-tls:/etc/caddy/Caddyfile:ro
+      - ./secrets/tls/fullchain.pem:/etc/caddy/tls/fullchain.pem:ro
+      - ./secrets/tls/privkey.pem:/etc/caddy/tls/privkey.pem:ro
+    ports:
+      - "18443:443"
+      - "18443:443/udp"
+
+volumes:
+  postgres-data:
+  build-data:

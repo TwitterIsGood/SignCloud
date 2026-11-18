@@ -1,0 +1,69 @@
+# SignCloud
+
+> API-only cloud build, signing, packaging and cloud-Simulator verification for iOS and macOS.
+> A trusted Mac worker compiles with Xcode; clients upload source, poll for a result, and download
+> a signed IPA, Simulator app, DMG or verification evidence. Build management is API-only.
+
+Base URL: `https://build.example.com`
+Client: `https://build.example.com/client/signcloud_ai.py`
+Server: `https://build.example.com`
+
+Every `/v1/*` request sends `Authorization: Bearer $SIGNCLOUD_API_TOKEN`. Read the token from the
+caller's environment; never invent one. Public artifact, `/install/{token}` and `/view/{token}`
+links need no header.
+
+## Start here
+
+```bash
+mkdir -p "$HOME/.signcloud"
+curl -fsSL https://build.example.com/client/signcloud_ai.py -o "$HOME/.signcloud/signcloud_ai.py"
+chmod +x "$HOME/.signcloud/signcloud_ai.py"
+export SIGNCLOUD_SERVER=https://build.example.com
+export SIGNCLOUD_API_TOKEN='provided separately'
+```
+
+- Signed IPA for a registered iPhone:
+  `python3 "$HOME/.signcloud/signcloud_ai.py" . --kind xcode --scheme MyApp --cache-key myapp --name MyApp-iPhone --export-method development`
+- Build and drive the app in the cloud Simulator:
+  `python3 "$HOME/.signcloud/signcloud_ai.py" . --kind verify --scheme MyApp --verify-script SmokeTests/smoke.yaml`
+- Build to the caller's own Simulator: add `--kind simulator --install-simulator`.
+- macOS DMG: `--kind macos --scheme App --project App.xcodeproj --signing developer-id --notarize --artifact-format dmg`.
+- Re-sign an IPA: `python3 "$HOME/.signcloud/signcloud_ai.py" App.ipa --kind resign`.
+
+The client uploads only changed blobs, waits for the worker, downloads the artifact, and verifies
+its SHA-256 when the response provides one.
+
+## Documentation
+
+- [API and builds](https://build.example.com/docs/api.md) — kinds, spec fields, incremental
+  upload, poll/list/cancel, response schema, limits.
+- [Real iPhone builds](https://build.example.com/docs/ios-device.md) — Apple setup, device
+  enrollment, Development vs Ad Hoc, install page, enrollment API.
+- [Simulator and verification](https://build.example.com/docs/simulator.md) — local Simulator,
+  `verify` flows, live view, evidence ZIP.
+- [macOS apps](https://build.example.com/docs/macos.md) — Developer ID, notarization, stages,
+  failures, cache correctness.
+- [Native libraries](https://build.example.com/docs/native-artifacts.md) — prebuilt static
+  libraries, XcodeGen, source archive rules.
+- [Service and caching](https://build.example.com/docs/operations.md) — health, cache keys,
+  measured timings, limits.
+
+## Non-negotiables
+
+- The worker runs `xcodebuild`, not your build scripts. It never runs `cargo`, `pod install`,
+  `npm install`, custom Makefiles or downloaded toolchains. `expo` auto-installs its JS/CocoaPods
+  dependencies; `xcodegen generate` is the only other allow-listed action.
+- Any static library or vendored framework a target links must be built and included by the
+  caller. `ld: library 'foo' not found` means the artifact is missing from the upload.
+- Include shared schemes and the generated `.xcodeproj`. Exclude `.git`, `node_modules`,
+  `DerivedData`, `build`, `dist`.
+- A bundle ID already registered by another Apple team cannot be used. Keep extension IDs
+  consistent, prefer automatic signing, remove hard-coded profiles.
+- Never enroll devices speculatively; enrollment consumes the team's annual quota.
+- Signing secrets never leave the worker: never send `.p8`, certificates, private keys or
+  passwords in a prompt or API call.
+
+## Service
+
+`GET /healthz` · `GET /` (discovery) · `GET /llms.txt` (this index) · `GET /docs/{name}.md` ·
+`GET /client/signcloud_ai.py`

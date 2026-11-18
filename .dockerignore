@@ -1,0 +1,10 @@
+.git
+.env
+bin/*
+!bin/signcloud-server-linux
+data
+dist
+work
+*.p8
+*.p12
+*.mobileprovision
