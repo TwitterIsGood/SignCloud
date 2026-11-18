@@ -14,6 +14,13 @@ type ephemeralKeychainSession struct {
 	path            string
 	previousDefault string
 	previousSearch  []string
+	// xcodebuild runs with CFFIXED_USER_HOME set to the agent's build home, so
+	// codesign started by build scripts (CocoaPods "Embed Pods Frameworks")
+	// reads the keychain search list from there, not from the real user. The
+	// session therefore installs the keychain in that preference domain too.
+	buildHomeEnv             []string
+	buildHomePreviousDefault string
+	buildHomePreviousSearch  []string
 }
 
 func (a *Agent) beginEphemeralKeychain(jobDir string) (*ephemeralKeychainSession, error) {
@@ -58,6 +65,27 @@ func (a *Agent) beginEphemeralKeychain(jobDir string) (*ephemeralKeychainSession
 			return nil, err
 		}
 	}
+	if environment, envErr := a.xcodeEnvironment(); envErr == nil {
+		session.buildHomeEnv = environment
+		if output, commandErr := securityOutputEnv(environment, "default-keychain", "-d", "user"); commandErr == nil {
+			session.buildHomePreviousDefault = parseKeychainPath(string(output))
+		}
+		if output, commandErr := securityOutputEnv(environment, "list-keychains", "-d", "user"); commandErr == nil {
+			session.buildHomePreviousSearch = parseKeychainList(string(output))
+		}
+		buildHomeSearch := []string{"list-keychains", "-d", "user", "-s", session.path}
+		for _, path := range session.buildHomePreviousSearch {
+			if path != "" && path != session.path {
+				buildHomeSearch = append(buildHomeSearch, path)
+			}
+		}
+		for _, args := range [][]string{buildHomeSearch, {"default-keychain", "-d", "user", "-s", session.path}} {
+			if _, err := securityOutputEnv(environment, args...); err != nil {
+				_ = session.Close()
+				return nil, fmt.Errorf("install ephemeral keychain for build home: %w", err)
+			}
+		}
+	}
 	identities, err := securityOutput("find-identity", "-v", "-p", "codesigning", session.path)
 	if err != nil {
 		_ = session.Close()
@@ -87,6 +115,22 @@ func (s *ephemeralKeychainSession) Close() error {
 			cleanupErrors = append(cleanupErrors, "restore default keychain: "+err.Error())
 		}
 	}
+	if s.buildHomeEnv != nil {
+		search := []string{"list-keychains", "-d", "user", "-s"}
+		for _, path := range s.buildHomePreviousSearch {
+			if path != "" && path != s.path {
+				search = append(search, path)
+			}
+		}
+		if _, err := securityOutputEnv(s.buildHomeEnv, search...); err != nil {
+			cleanupErrors = append(cleanupErrors, "restore build home search list: "+err.Error())
+		}
+		if s.buildHomePreviousDefault != "" && s.buildHomePreviousDefault != s.path {
+			if _, err := securityOutputEnv(s.buildHomeEnv, "default-keychain", "-d", "user", "-s", s.buildHomePreviousDefault); err != nil {
+				cleanupErrors = append(cleanupErrors, "restore build home default keychain: "+err.Error())
+			}
+		}
+	}
 	if _, err := securityOutput("delete-keychain", s.path); err != nil {
 		cleanupErrors = append(cleanupErrors, "delete keychain: "+err.Error())
 		_ = os.Remove(s.path)
@@ -99,7 +143,17 @@ func (s *ephemeralKeychainSession) Close() error {
 }
 
 func securityOutput(args ...string) ([]byte, error) {
-	output, err := exec.Command("/usr/bin/security", args...).CombinedOutput()
+	return securityOutputEnv(nil, args...)
+}
+
+// securityOutputEnv runs security with environment overrides, such as the
+// build home whose preference domain holds the keychain search list.
+func securityOutputEnv(environment []string, args ...string) ([]byte, error) {
+	command := exec.Command("/usr/bin/security", args...)
+	if environment != nil {
+		command.Env = childEnvironment(environment)
+	}
+	output, err := command.CombinedOutput()
 	if err != nil {
 		return output, fmt.Errorf("security %s failed: %w: %s", args[0], err, strings.TrimSpace(string(output)))
 	}
