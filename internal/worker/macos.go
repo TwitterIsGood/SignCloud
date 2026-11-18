@@ -84,7 +84,7 @@ func (r *jobRunner) buildMacOSAt(ctx context.Context, root string, spec BuildSpe
 		"ARCHS="+strings.Join(architectures, " "), "ONLY_ACTIVE_ARCH=NO",
 		"CODE_SIGN_STYLE=Manual", "CODE_SIGN_IDENTITY=-", "CODE_SIGNING_REQUIRED=YES", "build")
 	started := time.Now()
-	if err := r.command(ctx, root, r.withXcodeVersion(xcodeEnv), "xcodebuild", args...); err != nil {
+	if err := r.xcodebuildCompile(ctx, root, r.withXcodeVersion(xcodeEnv), args); err != nil {
 		return "", ArtifactMetadata{}, fmt.Errorf("building: macOS xcodebuild failed; verify the shared Scheme, configuration, deployment target, and Universal-compatible dependencies: %w", err)
 	}
 	r.xcodeMS += time.Since(started).Milliseconds()

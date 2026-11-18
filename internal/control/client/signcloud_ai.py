@@ -59,6 +59,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--upload-jobs", type=int, default=4, help="parallel blob uploads (default: 4)")
     parser.add_argument("--clean", action="store_true", help="discard this project's DerivedData before building")
     parser.add_argument("--standard-export", action="store_true", help="use Xcode archive/export instead of fast development packaging")
+    parser.add_argument("--standard-build", action="store_true", help="keep every Xcode build setting; skip the fast Debug build profile")
     parser.add_argument("--architectures", help="macOS architectures, comma-separated: arm64,x86_64")
     parser.add_argument("--signing", choices=("adhoc", "developer-id"), help="macOS signing mode")
     parser.add_argument("--notarize", action="store_true", help="submit a Developer ID macOS artifact to Apple notarization")
@@ -548,6 +549,14 @@ def booted_simulator() -> bool:
     return any(devices for devices in data.get("devices", {}).values())
 
 
+def local_simulator_arch() -> str:
+    """The architecture this Mac's Simulator runs natively, or "" elsewhere."""
+    if sys.platform != "darwin":
+        return ""
+    machine = platform.machine()
+    return machine if machine in ("arm64", "x86_64") else ""
+
+
 def install_simulator_artifact(artifact_url: str, bundle_id: str) -> None:
     if platform.system() != "Darwin" or not shutil.which("xcrun"):
         raise RuntimeError("simulator installation requires a Mac with Xcode")
@@ -681,6 +690,11 @@ def main() -> int:
             "clean": args.clean,
             "fast_package": kind in ("xcode", "expo") and args.export_method == "development" and not args.standard_export,
         }
+        if kind in ("xcode", "expo", "simulator") and not args.standard_build:
+            spec["build_profile"] = "fast"
+            simulator_arch = local_simulator_arch() if kind == "simulator" else ""
+            if simulator_arch:
+                spec["simulator_arch"] = simulator_arch
 
     temporary: tempfile.TemporaryDirectory[str] | None = None
     upload = source

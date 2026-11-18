@@ -39,6 +39,13 @@ type jobRunner struct {
 	cpuSystemMS    int64
 	peakRSSBytes   int64
 	verification   *VerificationMetrics
+
+	compilationCacheHits   int
+	compilationCacheMisses int
+	compilationCacheReason string
+	buildProfile           string
+	buildProfileApplied    []string
+	buildProfileNotes      []string
 }
 
 type fastPackageFallbackError struct{ err error }
@@ -69,6 +76,12 @@ func (r *jobRunner) applyMetrics(metrics *SyncMetrics) {
 	metrics.CPUUserMS = r.cpuUserMS
 	metrics.CPUSystemMS = r.cpuSystemMS
 	metrics.PeakRSSBytes = r.peakRSSBytes
+	metrics.CompilationCacheHits = r.compilationCacheHits
+	metrics.CompilationCacheMisses = r.compilationCacheMisses
+	metrics.CompilationCacheReason = r.compilationCacheReason
+	metrics.BuildProfile = r.buildProfile
+	metrics.BuildProfileSettings = r.buildProfileApplied
+	metrics.BuildProfileNotes = r.buildProfileNotes
 	metrics.Verification = r.verification
 }
 
@@ -176,11 +189,11 @@ func (r *jobRunner) buildSimulatorAppAt(ctx context.Context, root string, spec B
 	args = append(args, xcodeTrustArgs()...)
 	args = append(args, "-parallelizeTargets",
 		"-sdk", "iphonesimulator", "-destination", "generic/platform=iOS Simulator",
-		"-derivedDataPath", derivedData, "CODE_SIGNING_ALLOWED=NO",
-		"COMPILATION_CACHE_CAS_PATH="+r.agent.compilationCachePath(r.developerDir),
-		"COMPILATION_CACHE_KEEP_CAS_DIRECTORY=YES", "build")
+		"-derivedDataPath", derivedData, "CODE_SIGNING_ALLOWED=NO")
+	args = r.applyBuildProfile(ctx, args, root, spec, configuration, profileSimulator)
+	args = append(args, "build")
 	started := time.Now()
-	if err := r.command(ctx, root, r.withXcodeVersion(xcodeEnv), "xcodebuild", args...); err != nil {
+	if err := r.xcodebuildCompile(ctx, root, r.withXcodeVersion(xcodeEnv), args); err != nil {
 		return "", err
 	}
 	r.xcodeMS += time.Since(started).Milliseconds()
@@ -369,12 +382,13 @@ func (r *jobRunner) buildDevelopmentIPA(ctx context.Context, root string, spec B
 			r.agent.log(ctx, r.buildID, "Wildcard profile not applicable: "+reason+"\n")
 		}
 	}
+	args = r.applyBuildProfile(ctx, args, root, spec, configuration, profileDevice)
 	args = append(args, "build")
 	if spec.AllowProvisioningUpdates {
 		args = append(args, r.provisioningAuthArgs()...)
 	}
 	started := time.Now()
-	if err := r.command(ctx, root, r.withXcodeVersion(xcodeEnv), "xcodebuild", args...); err != nil {
+	if err := r.xcodebuildCompile(ctx, root, r.withXcodeVersion(xcodeEnv), args); err != nil {
 		return "", err
 	}
 	r.xcodeMS += time.Since(started).Milliseconds()
@@ -693,7 +707,7 @@ func (r *jobRunner) archiveAndExport(ctx context.Context, root string, spec Buil
 		args = append(args, r.provisioningAuthArgs()...)
 	}
 	started := time.Now()
-	if err := r.command(ctx, root, r.withXcodeVersion(xcodeEnv), "xcodebuild", args...); err != nil {
+	if err := r.xcodebuildCompile(ctx, root, r.withXcodeVersion(xcodeEnv), args); err != nil {
 		return "", err
 	}
 	r.archiveMS += time.Since(started).Milliseconds()

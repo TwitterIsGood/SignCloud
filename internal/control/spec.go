@@ -92,7 +92,24 @@ func parseAndValidateBuildSpec(kind string, raw []byte) (BuildSpec, error) {
 	if err := validateXcodeVersion(spec.XcodeVersion); err != nil {
 		return BuildSpec{}, err
 	}
+	if err := validateBuildProfile(spec); err != nil {
+		return BuildSpec{}, err
+	}
 	return spec, nil
+}
+
+func validateBuildProfile(spec BuildSpec) error {
+	switch spec.BuildProfile {
+	case "", "standard", "fast":
+	default:
+		return errors.New("build_profile must be standard or fast")
+	}
+	switch spec.SimulatorArch {
+	case "", "arm64", "x86_64":
+	default:
+		return errors.New("simulator_arch must be arm64 or x86_64")
+	}
+	return nil
 }
 
 var verifyDeviceOSPattern = regexp.MustCompile(`^[0-9.<>= -]+$`)

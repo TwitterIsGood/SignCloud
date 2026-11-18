@@ -61,6 +61,7 @@ Useful `spec` fields:
   "team_id": "APPLE_TEAM_ID",
   "export_method": "development",
   "fast_package": true,
+  "build_profile": "fast",
   "allow_provisioning_updates": true,
   "xcode_version": "27"
 }
@@ -71,6 +72,15 @@ Useful `spec` fields:
 `fast_package: true` (the official client's default) packages the signed `.app` straight into an
 IPA and skips Archive/Export. Use the standard path for Ad Hoc, App Store, Enterprise, or projects
 whose export process performs custom transformations (`--standard-export` in the client).
+
+`build_profile: "fast"` (the official client's default for `xcode`, `expo` and `simulator`)
+applies only to Debug builds and leaves Release/Archive untouched. It turns off the index store
+(`COMPILER_INDEX_STORE_ENABLE=NO`), which only Xcode's editor reads. For `simulator`, an added
+`simulator_arch` (`arm64` or `x86_64`; the client sends its own Mac's architecture) builds that
+architecture only instead of both. A setting the project or its `.xcconfig` files declare
+explicitly is kept, as is `ARCHS` when the project excludes the requested architecture; the
+build's `build_profile_settings` and `build_profile_notes` metrics say what was applied. Use
+`--standard-build` in the client to keep every setting as declared.
 
 `xcode_version` is accepted by every kind. Give a major version (`"26"`, `"27"`) for the newest
 installed Xcode in that series or a full version (`"26.6"`) to pin it. Omit it for the worker's

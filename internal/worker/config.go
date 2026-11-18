@@ -17,6 +17,9 @@ type Config struct {
 	CacheRoot                 string
 	CacheMaxGB                int64
 	CacheTTL                  time.Duration
+	CompilationCache          string
+	CompilationCacheMaxGB     int64
+	BlobCacheMaxGB            int64
 	TeamID                    string
 	SigningIdentity           string
 	ProvisioningProfile       string
@@ -103,12 +106,31 @@ func ConfigFromEnv() (Config, error) {
 		}
 		cfg.CacheMaxGB = value
 	}
+	for name, target := range map[string]*int64{
+		"SIGNCLOUD_COMPILATION_CACHE_MAX_GB": &cfg.CompilationCacheMaxGB,
+		"SIGNCLOUD_BLOB_CACHE_MAX_GB":        &cfg.BlobCacheMaxGB,
+	} {
+		if raw := strings.TrimSpace(os.Getenv(name)); raw != "" {
+			value, err := strconv.ParseInt(raw, 10, 64)
+			if err != nil || value < 1 {
+				return Config{}, fmt.Errorf("%s must be a positive integer", name)
+			}
+			*target = value
+		}
+	}
 	if raw := os.Getenv("SIGNCLOUD_CACHE_TTL_HOURS"); raw != "" {
 		value, err := strconv.ParseInt(raw, 10, 64)
 		if err != nil || value < 1 {
 			return Config{}, fmt.Errorf("SIGNCLOUD_CACHE_TTL_HOURS must be a positive integer")
 		}
 		cfg.CacheTTL = time.Duration(value) * time.Hour
+	}
+	cfg.CompilationCache = compilationCacheAuto
+	if raw := strings.ToLower(strings.TrimSpace(os.Getenv("SIGNCLOUD_COMPILATION_CACHE"))); raw != "" {
+		if raw != compilationCacheAuto && raw != compilationCacheOff {
+			return Config{}, fmt.Errorf("SIGNCLOUD_COMPILATION_CACHE must be auto or off")
+		}
+		cfg.CompilationCache = raw
 	}
 	if raw := strings.TrimSpace(os.Getenv("IOS_EPHEMERAL_KEYCHAIN")); raw != "" {
 		value, err := strconv.ParseBool(raw)

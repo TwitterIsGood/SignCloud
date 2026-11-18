@@ -82,3 +82,14 @@ func TestValidateResolveSpec(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateBuildProfile(t *testing.T) {
+	if _, err := parseAndValidateBuildSpec("simulator", []byte(`{"build_profile":"fast","simulator_arch":"arm64"}`)); err != nil {
+		t.Fatalf("valid fast profile rejected: %v", err)
+	}
+	for _, raw := range []string{`{"build_profile":"turbo"}`, `{"simulator_arch":"armv7"}`} {
+		if _, err := parseAndValidateBuildSpec("xcode", []byte(raw)); err == nil {
+			t.Fatalf("expected %s to be rejected", raw)
+		}
+	}
+}

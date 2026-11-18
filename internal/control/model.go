@@ -17,6 +17,8 @@ type BuildSpec struct {
 	AllowProvisioningUpdates bool              `json:"allow_provisioning_updates,omitempty"`
 	Clean                    bool              `json:"clean,omitempty"`
 	FastPackage              bool              `json:"fast_package,omitempty"`
+	BuildProfile             string            `json:"build_profile,omitempty"`
+	SimulatorArch            string            `json:"simulator_arch,omitempty"`
 	Architectures            []string          `json:"architectures,omitempty"`
 	Signing                  string            `json:"signing,omitempty"`
 	Notarize                 bool              `json:"notarize,omitempty"`

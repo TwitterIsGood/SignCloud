@@ -394,70 +394,11 @@ func (a *Agent) toolchainID(developerDir string) string {
 }
 
 func (a *Agent) compilationCachePath(developerDir string) string {
-	path := filepath.Join(a.cfg.CacheRoot, "toolchains", a.toolchainID(developerDir), "CompilationCache.noindex")
+	toolchainRoot := filepath.Join(a.cfg.CacheRoot, "toolchains", a.toolchainID(developerDir))
+	path := filepath.Join(toolchainRoot, "CompilationCache.noindex")
 	_ = os.MkdirAll(path, 0o750)
+	touchLastUsed(toolchainRoot)
 	return path
-}
-
-func (a *Agent) cleanupCaches(currentRoot string) {
-	a.cleanupMu.Lock()
-	defer a.cleanupMu.Unlock()
-	if time.Since(a.lastCleanup) < time.Hour {
-		return
-	}
-	a.lastCleanup = time.Now()
-
-	cutoff := time.Now().Add(-a.cfg.CacheTTL)
-	projectsRoot := filepath.Join(a.cfg.CacheRoot, "projects")
-	entries, _ := os.ReadDir(projectsRoot)
-	type candidate struct {
-		path string
-		used time.Time
-		size int64
-	}
-	var candidates []candidate
-	var total int64
-	for _, project := range entries {
-		if !project.IsDir() {
-			continue
-		}
-		projectPath := filepath.Join(projectsRoot, project.Name())
-		toolchains, _ := os.ReadDir(projectPath)
-		for _, toolchain := range toolchains {
-			if !toolchain.IsDir() {
-				continue
-			}
-			path := filepath.Join(projectPath, toolchain.Name())
-			if path == currentRoot {
-				continue
-			}
-			info, _ := os.Stat(filepath.Join(path, "last-used"))
-			used := time.Time{}
-			if info != nil {
-				used = info.ModTime()
-			}
-			size := directorySize(path)
-			total += size
-			if !used.IsZero() && used.Before(cutoff) {
-				_ = os.RemoveAll(path)
-				total -= size
-				continue
-			}
-			candidates = append(candidates, candidate{path: path, used: used, size: size})
-		}
-	}
-	maxBytes := a.cfg.CacheMaxGB * 1024 * 1024 * 1024
-	if total <= maxBytes {
-		return
-	}
-	sort.Slice(candidates, func(i, j int) bool { return candidates[i].used.Before(candidates[j].used) })
-	for _, item := range candidates {
-		if total <= maxBytes {
-			break
-		}
-		_ = os.RemoveAll(item.path)
-		total -= item.size
-	}
 }
 
 func directorySize(root string) int64 {
