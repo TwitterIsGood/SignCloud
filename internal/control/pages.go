@@ -7,19 +7,19 @@ const manifestTemplate = `<?xml version="1.0" encoding="UTF-8"?>
 <key>metadata</key><dict><key>bundle-identifier</key><string>%s</string><key>bundle-version</key><string>%s</string><key>kind</key><string>software</string><key>title</key><string>%s</string></dict>
 </dict></array></dict></plist>`
 
-const installPage = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="light"><title>{{.Name}} - 安装</title><style>
-:root{--bg:#f3f5f7;--card:#fff;--ink:#171a1f;--muted:#727a84;--line:#e3e7ec;--blue:#1769e0;--blue-soft:#eaf2fd;--ok:#1a7f4b;--ok-soft:#e7f6ee;--warn:#805c12;--warn-soft:#fff5df;--bad:#b42318;--bad-soft:#fdecea;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;color:var(--ink);background:var(--bg);letter-spacing:0}
+const installPage = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="light dark"><title>{{.Name}} - 安装</title><style>
+:root{--bg:#f3f5f7;--card:#fff;--ink:#171a1f;--muted:#727a84;--line:#e3e7ec;--blue:#1769e0;--blue-soft:#eaf2fd;--ok:#1a7f4b;--ok-soft:#e7f6ee;--warn:#805c12;--warn-soft:#fff5df;--bad:#b42318;--bad-soft:#fdecea;--chip:#f1f3f6;--track:#edf0f4;--stage-bg:#f4f6f9;--panel:#fbfcfd;--qr-bg:#fbfcfd;--qr-ink:#727a84;--facts-muted:#7c848e;--note:#747c86;--button-bg:#1769e0;--button-ink:#fff;--secondary-bg:#fff;--secondary-border:#b9cff0;--notice-border:#efdaa7;--error-border:#f3c2bd;--log-bg:#14181f;--log-ink:#d7dde7;--shadow:0 12px 32px rgba(17,24,39,.06);font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;color:var(--ink);background:var(--bg);letter-spacing:0}
 *{box-sizing:border-box}html,body{max-width:100%;overflow-x:hidden}body{margin:0;min-height:100vh;min-height:100dvh;display:grid;place-items:center;padding:24px}
-.shell{width:min(940px,100%);background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:0 12px 32px rgba(17,24,39,.06);display:grid;grid-template-columns:minmax(280px,340px) minmax(0,1fr);overflow:hidden}
-.qr{min-width:0;padding:38px;border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;justify-content:center;background:#fbfcfd}
+.shell{width:min(940px,100%);background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);display:grid;grid-template-columns:minmax(280px,340px) minmax(0,1fr);overflow:hidden}
+.qr{min-width:0;padding:38px;border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--qr-bg)}
 .qr img{display:block;width:250px;max-width:100%;height:auto;image-rendering:pixelated;border-radius:8px}
-.qr small{margin-top:16px;color:var(--muted);text-align:center;font-size:13px}
+.qr small{margin-top:16px;color:var(--qr-ink);text-align:center;font-size:13px}
 .info{min-width:0;padding:38px 40px 40px}
 .eyebrow{color:var(--blue);font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
 .info h1{font-size:28px;line-height:1.22;margin:10px 0 12px;overflow-wrap:anywhere}
 .meta{display:flex;align-items:center;gap:10px;flex-wrap:wrap;color:var(--muted);margin-bottom:26px;font-size:14px}
-.kind{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;background:#f1f3f6;border-radius:6px;padding:2px 7px}
-.pill{display:inline-flex;align-items:center;gap:7px;padding:4px 11px;border-radius:999px;font-size:12px;font-weight:700;background:#f1f3f6;color:var(--muted)}
+.kind{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;background:var(--chip);border-radius:6px;padding:2px 7px}
+.pill{display:inline-flex;align-items:center;gap:7px;padding:4px 11px;border-radius:999px;font-size:12px;font-weight:700;background:var(--chip);color:var(--muted)}
 .pill::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor;flex:none}
 .pill[data-status=running]{background:var(--blue-soft);color:var(--blue)}
 .pill[data-status=running]::before{animation:pulse 1.4s ease-in-out infinite}
@@ -29,7 +29,7 @@ const installPage = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-
 .progress{margin:0 0 22px}
 .progress-top{display:flex;align-items:baseline;justify-content:space-between;gap:10px 16px;font-size:13px;color:var(--muted);margin-bottom:9px;flex-wrap:wrap}
 .progress-top b{color:var(--ink);font-weight:600}
-.track{position:relative;height:8px;border-radius:999px;background:#edf0f4;overflow:hidden}
+.track{position:relative;height:8px;border-radius:999px;background:var(--track);overflow:hidden}
 .bar{position:relative;height:100%;width:0;border-radius:999px;background:linear-gradient(90deg,#1769e0,#5aa2ff);transition:width .6s ease}
 .bar.busy::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.6),transparent);animation:sheen 1.6s linear infinite}
 .bar.failed{background:linear-gradient(90deg,#b42318,#e4635a)}
@@ -37,18 +37,18 @@ const installPage = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-
 .track.indeterminate .bar{width:38%;animation:slide 1.5s ease-in-out infinite}
 @keyframes slide{0%{transform:translateX(-110%)}100%{transform:translateX(300%)}}
 .stages{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
-.stage{font-size:12px;line-height:1.4;color:var(--muted);background:#f4f6f9;border:1px solid var(--line);padding:4px 10px;border-radius:999px}
+.stage{font-size:12px;line-height:1.4;color:var(--muted);background:var(--stage-bg);border:1px solid var(--line);padding:4px 10px;border-radius:999px}
 .stage.done{color:var(--ok);background:var(--ok-soft);border-color:transparent}
 .stage.current{color:var(--blue);background:var(--blue-soft);border-color:transparent;font-weight:700}
 .stage.failed{color:var(--bad);background:var(--bad-soft);border-color:transparent;font-weight:700}
 .facts{display:grid;grid-template-columns:96px minmax(0,1fr);gap:12px 18px;font-size:14px;margin-bottom:30px}
-.facts span{color:#7c848e}.facts strong{min-width:0;overflow-wrap:anywhere;word-break:break-word;font-weight:600}
-.button{display:block;width:100%;text-align:center;text-decoration:none;background:var(--blue);color:#fff;padding:13px 18px;border-radius:9px;font-weight:700;margin-top:10px;font-size:15px}
-.button.secondary{background:#fff;color:var(--blue);border:1px solid #b9cff0}
-.note{max-width:100%;font-size:12px;color:#747c86;line-height:1.6;margin:20px 0 0;overflow-wrap:anywhere}
-.notice{padding:12px 14px;background:var(--warn-soft);color:var(--warn);border:1px solid #efdaa7;border-radius:9px;font-size:14px}
-.error{padding:12px 14px;background:var(--bad-soft);color:var(--bad);border:1px solid #f3c2bd;border-radius:9px;font-size:13px;margin-top:12px;white-space:pre-wrap;overflow-wrap:anywhere}
-details.panel{margin-top:22px;border:1px solid var(--line);border-radius:10px;background:#fbfcfd;overflow:hidden}
+.facts span{color:var(--facts-muted)}.facts strong{min-width:0;overflow-wrap:anywhere;word-break:break-word;font-weight:600}
+.button{display:block;width:100%;text-align:center;text-decoration:none;background:var(--button-bg);color:var(--button-ink);padding:13px 18px;border-radius:9px;font-weight:700;margin-top:10px;font-size:15px}
+.button.secondary{background:var(--secondary-bg);color:var(--blue);border:1px solid var(--secondary-border)}
+.note{max-width:100%;font-size:12px;color:var(--note);line-height:1.6;margin:20px 0 0;overflow-wrap:anywhere}
+.notice{padding:12px 14px;background:var(--warn-soft);color:var(--warn);border:1px solid var(--notice-border);border-radius:9px;font-size:14px}
+.error{padding:12px 14px;background:var(--bad-soft);color:var(--bad);border:1px solid var(--error-border);border-radius:9px;font-size:13px;margin-top:12px;white-space:pre-wrap;overflow-wrap:anywhere}
+details.panel{margin-top:22px;border:1px solid var(--line);border-radius:10px;background:var(--panel);overflow:hidden}
 details.panel>summary{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 15px;cursor:pointer;font-size:14px;font-weight:600;list-style:none;user-select:none}
 details.panel>summary::-webkit-details-marker{display:none}
 .chev{color:var(--muted);transition:transform .18s ease;font-size:12px}
@@ -56,11 +56,12 @@ details[open] .chev{transform:rotate(90deg)}
 .detail-body{padding:0 15px 15px}
 .detail-body .facts{margin:4px 0 0;gap:10px 16px;font-size:13px}
 .section-label{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:16px 0 8px;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
-pre.log{margin:0;padding:13px 14px;background:#14181f;color:#d7dde7;border-radius:9px;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-word;max-height:340px;overflow:auto;-webkit-overflow-scrolling:touch}
+pre.log{margin:0;padding:13px 14px;background:var(--log-bg);color:var(--log-ink);border-radius:9px;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-word;max-height:340px;overflow:auto;-webkit-overflow-scrolling:touch}
 .empty{color:var(--muted);font-size:12px;font-weight:400;text-transform:none;letter-spacing:0}
-@media(max-width:720px){body{display:block;padding:0;background:#fff}.shell{width:100%;min-height:100dvh;border:0;border-radius:0;box-shadow:none;grid-template-columns:1fr;align-content:start}.qr{border-right:0;border-bottom:1px solid var(--line);padding:22px}.qr img{width:184px}.qr small{margin-top:12px}.info{padding:24px 20px 40px}.info h1{font-size:24px}.meta{margin-bottom:22px}.facts{grid-template-columns:86px minmax(0,1fr);gap:10px 14px;margin-bottom:24px}.button{padding:14px 18px}pre.log{max-height:44vh}.detail-body{padding:0 12px 12px}.progress-top{display:block;font-size:12px}.progress-top>span{display:block}.progress-top>span+span{margin-top:4px}}
+@media(max-width:720px){body{display:block;padding:0;background:var(--card)}.shell{width:100%;min-height:100dvh;border:0;border-radius:0;box-shadow:none;grid-template-columns:1fr;align-content:start}.qr{border-right:0;border-bottom:1px solid var(--line);padding:22px}.qr img{width:184px}.qr small{margin-top:12px}.info{padding:24px 20px 40px}.info h1{font-size:24px}.meta{margin-bottom:22px}.facts{grid-template-columns:86px minmax(0,1fr);gap:10px 14px;margin-bottom:24px}.button{padding:14px 18px}pre.log{max-height:44vh}.detail-body{padding:0 12px 12px}.progress-top{display:block;font-size:12px}.progress-top>span{display:block}.progress-top>span+span{margin-top:4px}}
 @media(max-width:380px){.qr img{width:156px}.info{padding-inline:16px}.facts{grid-template-columns:1fr;gap:3px}.facts strong{margin-bottom:8px}.detail-body .facts{grid-template-columns:1fr}}
 @media(prefers-reduced-motion:reduce){.bar.busy::after,.track.indeterminate .bar,.pill[data-status=running]::before{animation:none}}
+@media(prefers-color-scheme:dark){:root{--bg:#0f1115;--card:#161a20;--ink:#e8ecf2;--muted:#98a2b0;--line:#2a313b;--blue:#6aa8ff;--blue-soft:#16253a;--ok:#4ad08b;--ok-soft:#10261b;--warn:#e0b96a;--warn-soft:#2a2113;--bad:#ff8a7a;--bad-soft:#2d1614;--chip:#222a34;--track:#222a34;--stage-bg:#1d232b;--panel:#1a1f26;--qr-bg:#fff;--qr-ink:#5b6470;--facts-muted:#8f99a6;--note:#8b94a1;--button-bg:#2f7de1;--button-ink:#fff;--secondary-bg:#1a2029;--secondary-border:#34507a;--notice-border:#4a3b1c;--error-border:#4a2521;--log-bg:#0c1015;--log-ink:#c9d2de;--shadow:0 12px 32px rgba(0,0,0,.55)}.bar.busy::after{background:linear-gradient(90deg,transparent,rgba(255,255,255,.18),transparent)}}
 </style></head><body><main class="shell" id="page" data-status="{{.Status}}" data-status-url="/install/{{.InstallToken}}/status" data-created="{{.CreatedAt.Format "2006-01-02T15:04:05Z07:00"}}" data-updated="{{.UpdatedAt.Format "2006-01-02T15:04:05Z07:00"}}">
 <section class="qr"><img src="{{.QRURL}}" alt="安装二维码"><small>{{if eq .Status "succeeded"}}使用 iPhone 相机扫描此二维码{{else}}扫码在 iPhone 上查看构建进度{{end}}</small></section>
 <section class="info"><div class="eyebrow">SignCloud iOS Distribution</div><h1>{{.Name}}</h1>
