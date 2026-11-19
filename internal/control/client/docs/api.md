@@ -75,7 +75,8 @@ whose export process performs custom transformations (`--standard-export` in the
 
 `build_profile: "fast"` (the official client's default for `xcode`, `expo` and `simulator`)
 applies only to Debug builds and leaves Release/Archive untouched. It turns off the index store
-(`COMPILER_INDEX_STORE_ENABLE=NO`), which only Xcode's editor reads. For `simulator`, an added
+(`COMPILER_INDEX_STORE_ENABLE=NO`), which only Xcode's editor reads, and skips the dSYM bundle
+(`DEBUG_INFORMATION_FORMAT=dwarf`) unless a Debug configuration asks for one. For `simulator`, an added
 `simulator_arch` (`arm64` or `x86_64`; the client sends its own Mac's architecture) builds that
 architecture only instead of both. A setting the project or its `.xcconfig` files declare
 explicitly is kept, as is `ARCHS` when the project excludes the requested architecture; the

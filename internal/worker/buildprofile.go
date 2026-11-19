@@ -17,6 +17,9 @@ import (
 //
 //   - COMPILER_INDEX_STORE_ENABLE=NO: the index store only serves Xcode's
 //     editor; measured at about 20% of a warm Debug compile.
+//   - DEBUG_INFORMATION_FORMAT=dwarf: skips the dSYM bundle, a separate copy
+//     of the debug symbols that only crash symbolication of a shipped build
+//     needs; debugging still works from the symbols in the object files.
 //   - ARCHS=<simulator_arch> (Simulator only, when the caller names the arch
 //     its Simulator runs): a generic Simulator destination otherwise compiles
 //     both arm64 and x86_64, doubling Swift compile work.
@@ -59,6 +62,11 @@ func (r *jobRunner) decideProfile(root string, spec BuildSpec, configuration str
 	} else {
 		decision.settings = append(decision.settings, "COMPILER_INDEX_STORE_ENABLE=NO")
 	}
+	if declared.debugInfoOverride {
+		decision.notes = append(decision.notes, "DEBUG_INFORMATION_FORMAT kept: set by the project for Debug")
+	} else {
+		decision.settings = append(decision.settings, "DEBUG_INFORMATION_FORMAT=dwarf")
+	}
 	if target == profileSimulator && spec.SimulatorArch != "" {
 		arch := spec.SimulatorArch
 		switch {
@@ -95,6 +103,11 @@ func (r *jobRunner) applyBuildProfile(ctx context.Context, args []string, root s
 type declaredSettings struct {
 	keys     map[string]bool
 	excluded map[string]bool
+	// debugInfoOverride is set when a Debug configuration (or an xcconfig
+	// that is not Release-only) asks for a debug information format other
+	// than plain dwarf. Release declarations do not count: the profile only
+	// runs for Debug, and CocoaPods declares dwarf-with-dsym for Release.
+	debugInfoOverride bool
 }
 
 func (d declaredSettings) has(key string) bool { return d.keys[key] }
@@ -104,6 +117,22 @@ func (d declaredSettings) excludes(arch string) bool { return d.excluded[arch] }
 // settingAssignment matches `KEY = value;` in project.pbxproj and
 // `KEY = value` or `KEY[sdk=...] = value` in xcconfig files.
 var settingAssignment = regexp.MustCompile(`(?m)^\s*"?([A-Z][A-Z0-9_]*)(\[[^\]]*\])?"?\s*=\s*(.*)$`)
+
+// buildConfiguration matches one XCBuildConfiguration block of a pbxproj.
+var buildConfiguration = regexp.MustCompile(`(?s)isa = XCBuildConfiguration;\s*buildSettings = \{(.*?)\n\s*\};\s*name = "?([^";]+)"?;`)
+
+var debugInfoAssignment = regexp.MustCompile(`(?m)^\s*"?DEBUG_INFORMATION_FORMAT(\[[^\]]*\])?"?\s*=\s*"?([^";\n]*)"?`)
+
+// debugInfoNonDwarf reports whether text sets DEBUG_INFORMATION_FORMAT to
+// anything other than dwarf.
+func debugInfoNonDwarf(text string) bool {
+	for _, match := range debugInfoAssignment.FindAllStringSubmatch(text, -1) {
+		if strings.TrimSpace(match[2]) != "dwarf" {
+			return true
+		}
+	}
+	return false
+}
 
 var profileKeys = map[string]bool{
 	"ARCHS":                       true,
@@ -133,7 +162,17 @@ func declaredBuildSettings(root string) declaredSettings {
 		if readErr != nil {
 			return nil
 		}
-		for _, match := range settingAssignment.FindAllStringSubmatch(string(data), -1) {
+		text := string(data)
+		if entry.Name() == "project.pbxproj" {
+			for _, block := range buildConfiguration.FindAllStringSubmatch(text, -1) {
+				if strings.EqualFold(block[2], "Debug") && debugInfoNonDwarf(block[1]) {
+					declared.debugInfoOverride = true
+				}
+			}
+		} else if !strings.Contains(strings.ToLower(entry.Name()), "release") && debugInfoNonDwarf(text) {
+			declared.debugInfoOverride = true
+		}
+		for _, match := range settingAssignment.FindAllStringSubmatch(text, -1) {
 			key := match[1]
 			if !profileKeys[key] {
 				continue
